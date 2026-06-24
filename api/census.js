@@ -8,23 +8,21 @@ export default async function handler(req, res) {
   try {
     const headers = { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' };
 
-    // Search for the correct Census 2021 dataset IDs
     const searchRes = await fetch(
       `https://www.nomisweb.co.uk/api/v01/dataset/def.sdmx.json?search=*TS067*`,
       { headers }
     );
     const searchJson = await searchRes.json();
 
-    const searchRes2 = await fetch(
-      `https://www.nomisweb.co.uk/api/v01/dataset/def.sdmx.json?search=*qualification*2021*`,
-      { headers }
-    );
-    const searchJson2 = await searchRes2.json();
+    // Extract just the dataset IDs and names
+    const families = searchJson?.structure?.keyfamilies?.keyfamily || [];
+    const datasets = families.map(f => ({
+      id: f['@id'],
+      name: f['@name'] || f.name,
+      annotations: (f.annotations?.annotation || []).map(a => `${a.annotationtitle}: ${a.annotationtext}`).join(' | ')
+    }));
 
-    res.status(200).json({
-      ts067search: JSON.stringify(searchJson).slice(0, 600),
-      qualSearch: JSON.stringify(searchJson2).slice(0, 600),
-    });
+    res.status(200).json({ datasets });
 
   } catch (err) {
     res.status(500).json({ error: err.message });
