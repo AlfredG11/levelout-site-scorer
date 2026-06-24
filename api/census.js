@@ -8,24 +8,23 @@ export default async function handler(req, res) {
   try {
     const headers = { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' };
 
-    // Get the full definition to find correct parameter codes
-    const defRes = await fetch(
-      `https://www.nomisweb.co.uk/api/v01/dataset/NM_2083_1.def.sdmx.json`,
+    // Try fetching one row of data with no filters to see what comes back
+    const res1 = await fetch(
+      `https://www.nomisweb.co.uk/api/v01/dataset/NM_2083_1.data.json?geography=${lsoa}&measures=20100&RecordLimit=10`,
       { headers }
     );
-    const defJson = await defRes.json();
-    
-    // Dig into the codelists to find qualification variable codes
-    const keyfamilies = defJson?.structure?.keyfamilies?.keyfamily?.[0];
-    const components = keyfamilies?.components?.dimension || [];
-    const codelist = defJson?.structure?.codelists?.codelist || [];
+    const json1 = await res1.json();
+
+    // Also try the codelist for qualifications
+    const res2 = await fetch(
+      `https://www.nomisweb.co.uk/api/v01/dataset/NM_2083_1/C2021HIQUAL8.def.sdmx.json`,
+      { headers }
+    );
+    const json2 = await res2.json();
 
     res.status(200).json({
-      dimensions: components.map(c => ({ id: c['@conceptref'], codelist: c.codelistref })),
-      codelists: codelist.map(cl => ({
-        id: cl['@id'],
-        codes: (cl.code || []).slice(0, 10).map(c => ({ value: c['@value'], desc: c.description?.['#text'] }))
-      }))
+      sample: JSON.stringify(json1).slice(0, 800),
+      codelist: JSON.stringify(json2).slice(0, 800),
     });
 
   } catch (err) {
