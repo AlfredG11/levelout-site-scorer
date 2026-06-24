@@ -39,56 +39,12 @@ const LSOA_POSTCODE_MAP = {
 
 // ── LIVE API FUNCTIONS ────────────────────────────────────────────────────────
 
-async function fetchLSOAFromPostcode(postcode) {
-  const clean = postcode.replace(/\s/g, "").toUpperCase();
-  const res = await fetch(`https://api.postcodes.io/postcodes/${clean}`);
-  if (!res.ok) throw new Error("Postcode not found");
-  const json = await res.json();
-  const lsoa21 = json.result?.codes?.lsoa;
-  const district = json.result?.outcode;
-  const area = json.result?.admin_ward || json.result?.parliamentary_constituency || "";
-  return { lsoaCode: lsoa21, district, area };
-}
-
 async function fetchCensusForLSOA(lsoaCode) {
-  const base = "https://www.nomisweb.co.uk/api/v01/dataset";
-  const geo = `geography=${lsoaCode}`;
-  const fmt = "measures=20100&select=geography_name,geography_code,obs_value";
-
-  // TS067 — Level 4+ qualifications
-  const [degRes, ageRes, profRes] = await Promise.all([
-    fetch(`${base}/C2021TS067.data.json?${geo}&c2021_hiqual_8=7&${fmt}`),
-    fetch(`${base}/C2021TS007A.data.json?${geo}&c2021_age_92=6,7,8,9,10&${fmt}`),
-    fetch(`${base}/C2021TS062.data.json?${geo}&c_ns_sec_9=2,3&${fmt}`),
-  ]);
-
-  const [degJson, ageJson, profJson] = await Promise.all([
-    degRes.json(), ageRes.json(), profRes.json()
-  ]);
-
-  // Total population for percentages
-  const totalRes = await fetch(`${base}/C2021TS067.data.json?${geo}&c2021_hiqual_8=0&${fmt}`);
-  const totalJson = await totalRes.json();
-  const total = totalJson.obs?.[0]?.obs_value || 1;
-
-  const totalAgeRes = await fetch(`${base}/C2021TS007A.data.json?${geo}&c2021_age_92=0&${fmt}`);
-  const totalAgeJson = await totalAgeRes.json();
-  const totalAge = totalAgeJson.obs?.[0]?.obs_value || 1;
-
-  const totalProfRes = await fetch(`${base}/C2021TS062.data.json?${geo}&c_ns_sec_9=0&${fmt}`);
-  const totalProfJson = await totalProfRes.json();
-  const totalProf = totalProfJson.obs?.[0]?.obs_value || 1;
-
-  // Sum age 25-44 (codes 6,7,8,9,10 = 25-29,30-34,35-39,40-44)
-  const degVal = degJson.obs?.[0]?.obs_value || 0;
-  const ageVal = ageJson.obs?.reduce((s, o) => s + (o.obs_value || 0), 0) || 0;
-  const profVal = profJson.obs?.reduce((s, o) => s + (o.obs_value || 0), 0) || 0;
-
-  return {
-    deg:  Math.round((degVal  / total)    * 1000) / 10,
-    age:  Math.round((ageVal  / totalAge) * 1000) / 10,
-    prof: Math.round((profVal / totalProf)* 1000) / 10,
-  };
+  const res = await fetch(`/api/census?lsoa=${lsoaCode}`);
+  if (!res.ok) throw new Error("Census data unavailable");
+  const data = await res.json();
+  if (data.error) throw new Error(data.error);
+  return { deg: data.deg, age: data.age, prof: data.prof };
 }
 
 // ── SCORING HELPERS ───────────────────────────────────────────────────────────
