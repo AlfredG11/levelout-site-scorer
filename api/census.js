@@ -8,21 +8,24 @@ export default async function handler(req, res) {
   try {
     const headers = { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' };
 
-    // Try different parameter variations for TS067
-    const [a, b, c, d] = await Promise.all([
-      fetch(`https://www.nomisweb.co.uk/api/v01/dataset/NM_2083_1.data.json?geography=${lsoa}&c2021_hiqual_8=7&measures=20100`, { headers }),
-      fetch(`https://www.nomisweb.co.uk/api/v01/dataset/NM_2083_1.data.json?geography=${lsoa}&c2021_hiqual_8=8&measures=20100`, { headers }),
-      fetch(`https://www.nomisweb.co.uk/api/v01/dataset/NM_2083_1.data.json?geography=${lsoa}&measures=20100`, { headers }),
-      fetch(`https://www.nomisweb.co.uk/api/v01/dataset/NM_2083_1.def.sdmx.json`, { headers }),
-    ]);
-
-    const [aj, bj, cj, dj] = await Promise.all([a.json(), b.json(), c.json(), d.json()]);
+    // Get the full definition to find correct parameter codes
+    const defRes = await fetch(
+      `https://www.nomisweb.co.uk/api/v01/dataset/NM_2083_1.def.sdmx.json`,
+      { headers }
+    );
+    const defJson = await defRes.json();
+    
+    // Dig into the codelists to find qualification variable codes
+    const keyfamilies = defJson?.structure?.keyfamilies?.keyfamily?.[0];
+    const components = keyfamilies?.components?.dimension || [];
+    const codelist = defJson?.structure?.codelists?.codelist || [];
 
     res.status(200).json({
-      param7: aj.error || JSON.stringify(aj.obs || aj.noobs || 'no obs').slice(0, 200),
-      param8: bj.error || JSON.stringify(bj.obs || bj.noobs || 'no obs').slice(0, 200),
-      allParams: cj.error || JSON.stringify(cj).slice(0, 400),
-      definition: JSON.stringify(dj).slice(0, 500),
+      dimensions: components.map(c => ({ id: c['@conceptref'], codelist: c.codelistref })),
+      codelists: codelist.map(cl => ({
+        id: cl['@id'],
+        codes: (cl.code || []).slice(0, 10).map(c => ({ value: c['@value'], desc: c.description?.['#text'] }))
+      }))
     });
 
   } catch (err) {
