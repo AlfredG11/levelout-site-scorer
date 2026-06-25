@@ -1,50 +1,19 @@
 import { useState } from "react";
+import LSOA_CENSUS from "./lsoaCensus.js";
 
-// ── CONSTANTS ────────────────────────────────────────────────────────────────
+// ── CONSTANTS ─────────────────────────────────────────────────────────────────
 
 const THRESHOLDS = { deg: 55, age: 34, prof: 40 };
 
-// LSOA-level data for the 18 calibration sites (exact Nomis Census 2021 figures)
-const LSOA_DB = {
-  E01003344: { area: "Brockley",        deg: 58.2, age: 36.4, prof: 46.4, char: "village",   popDesc: "Young professional families, strong community identity" },
-  E01001593: { area: "Blackheath",       deg: 65.2, age: 34.2, prof: 55.1, char: "village",   popDesc: "Affluent families, highly educated village community" },
-  E01003953: { area: "East Dulwich",     deg: 71.9, age: 51.4, prof: 62.6, char: "village",   popDesc: "Young families, very high education and professional density" },
-  E01034486: { area: "Blackhorse Road",  deg: 76.5, age: 38.0, prof: null, char: "mixed",     popDesc: "Young creatives, rapidly gentrifying Walthamstow" },
-  E01003247: { area: "Deptford",         deg: 55.4, age: 50.4, prof: 42.2, char: "mixed",     popDesc: "Young professional and arts community, strong energy" },
-  E01003074: { area: "Herne Hill",       deg: 69.0, age: 47.1, prof: 56.0, char: "village",   popDesc: "Affluent young professionals, strong lifestyle culture" },
-  E01003055: { area: "Brixton",          deg: 63.1, age: 49.4, prof: 52.9, char: "mixed",     popDesc: "Young creative professionals, diverse and vibrant community" },
-  E01034217: { area: "East Village",     deg: 72.6, age: 54.1, prof: 49.6, char: "newbuild",  popDesc: "Young professionals, high-density purpose-built development" },
-  E01004063: { area: "Peckham",          deg: 67.6, age: 45.0, prof: 54.8, char: "mixed",     popDesc: "Young creative community, strong independent culture" },
-  E01001990: { area: "Crouch Hill",      deg: 70.8, age: 45.5, prof: 58.4, char: "mixed",     popDesc: "Young professionals, emerging village character on N8" },
-  E01032739: { area: "St Pauls (City)",  deg: 78.0, age: 52.4, prof: 66.1, char: "transient", popDesc: "Very high education but transient office population — low residential rootedness" },
-  E01035642: { area: "De Beauvoir",      deg: 68.6, age: 54.2, prof: 57.9, char: "mixed",     popDesc: "Young creative professionals, strong Hackney arts scene" },
-  E01004510: { area: "Wandsworth",       deg: 69.7, age: 51.0, prof: 61.8, char: "mixed",     popDesc: "Young families, professional community" },
-  E01003075: { area: "Camberwell",       deg: 42.3, age: 31.5, prof: 26.6, char: "mixed",     popDesc: "Mixed community — demographic profile below portfolio minimum" },
-  E01002778: { area: "Stoke Newington",  deg: 47.0, age: 36.7, prof: 30.7, char: "village",   popDesc: "Village character but professional density below portfolio minimum" },
-  E01003226: { area: "Forest Hill",      deg: 61.8, age: 41.4, prof: 51.0, char: "mixed",     popDesc: "Mixed families, borderline demographic profile" },
-  E01002000: { area: "Manor House",      deg: 58.4, age: 45.9, prof: 46.9, char: "mixed",     popDesc: "Mixed N4 community, modest professional density" },
-  E01001816: { area: "Hackney Downs",    deg: 58.4, age: 35.2, prof: 47.4, char: "mixed",     popDesc: "Young creatives, right demographic feel but borderline metrics" },
-};
+const DENSITY_BANDS = [
+  { max: 4000,  label: "Low density",       note: "Transport accessibility and visibility more critical — smaller walkable catchment.",      color: "#BA7517" },
+  { max: 10000, label: "Medium density",    note: "Standard catchment. Good balance of residential and commercial.",                          color: "#0F6E56" },
+  { max: 20000, label: "High density",      note: "Large walkable catchment. Strong potential for walk-in and word-of-mouth membership.",      color: "#0F6E56" },
+  { max: Infinity, label: "Very high density", note: "Exceptional density. Often correlates with new-build or transient populations — check neighbourhood character carefully.", color: "#BA7517" },
+];
 
-// Portfolio postcode → LSOA mapping (returns exact calibration data)
-const LSOA_POSTCODE_MAP = {
-  SE4: "E01003344", SE3: "E01001593", SE22: "E01003953",
-  E17: "E01034486", SE8: "E01003247", SE24: "E01003074",
-  SW9: "E01003055", E20: "E01034217", SE15: "E01004063",
-  N8:  "E01001990", EC4M: "E01032739", EC4: "E01032739",
-  N1:  "E01035642", SW18: "E01004510", SE5: "E01003075",
-  N16: "E01002778", SE23: "E01003226", N4:  "E01002000",
-  E8:  "E01001816",
-};
-
-// ── LIVE API FUNCTIONS ────────────────────────────────────────────────────────
-
-async function fetchCensusForLSOA(lsoaCode) {
-  const res = await fetch(`/api/census?lsoa=${lsoaCode}`);
-  if (!res.ok) throw new Error("Census data unavailable");
-  const data = await res.json();
-  if (data.error) throw new Error(data.error);
-  return { deg: data.deg, age: data.age, prof: data.prof };
+function getDensityBand(dens) {
+  return DENSITY_BANDS.find(b => dens < b.max) || DENSITY_BANDS[DENSITY_BANDS.length - 1];
 }
 
 // ── SCORING HELPERS ───────────────────────────────────────────────────────────
@@ -76,46 +45,49 @@ function getOverall(demoResult, compResult, viewResult) {
   if (!demoResult || !compResult || !viewResult) return null;
   const d = demoResult === "pass" ? "pass" : demoResult === "marginal" ? "warn" : "fail";
   if (d === "fail" || compResult === "fail" || viewResult === "fail") return "fail";
-  if (d === "warn" || compResult === "warn" || viewResult === "warn") return "warn";
+  if (d === "warn"  || compResult === "warn"  || viewResult === "warn")  return "warn";
   return "pass";
 }
 
-function inferCharacter(lsoaName, area) {
-  const s = (lsoaName + " " + area).toLowerCase();
-  if (s.includes("city of london") || s.includes("westminster") || s.includes("canary wharf")) return "transient";
-  if (s.includes("stratford") || s.includes("nine elms") || s.includes("thamesmead") || s.includes("canning town")) return "newbuild";
-  const villageAreas = ["blackheath","dulwich","herne hill","barnes","richmond","wimbledon","chiswick","hampstead","highgate","clapham","balham","putney","muswell hill","crouch end","notting hill","kensington","chelsea","battersea"];
-  if (villageAreas.some(v => s.includes(v))) return "village";
-  return "mixed";
+// ── POSTCODE LOOKUP ───────────────────────────────────────────────────────────
+
+async function fetchLSOAFromPostcode(postcode) {
+  const clean = postcode.replace(/\s/g, "").toUpperCase();
+  const res = await fetch(`https://api.postcodes.io/postcodes/${clean}`);
+  if (!res.ok) throw new Error("Postcode not found — please check and try again");
+  const json = await res.json();
+  if (!json.result) throw new Error("Postcode not found — please check and try again");
+  return {
+    lsoaCode: json.result?.codes?.lsoa,
+    ward:     json.result?.admin_ward || "",
+    district: json.result?.outcode || "",
+    borough:  json.result?.admin_district || "",
+  };
 }
 
-// ── SMALL UI COMPONENTS ───────────────────────────────────────────────────────
+// ── UI HELPERS ────────────────────────────────────────────────────────────────
 
-const RESULT_CONFIG = {
+const CFG = {
   pass:     { bg: "#E1F5EE", border: "#0F6E56", text: "#085041", icon: "✓" },
-  warn:     { bg: "#FAEEDA", border: "#854F0B", text: "#633806", icon: "⚠" },
   marginal: { bg: "#FAEEDA", border: "#854F0B", text: "#633806", icon: "⚠" },
+  warn:     { bg: "#FAEEDA", border: "#854F0B", text: "#633806", icon: "⚠" },
   fail:     { bg: "#FCEBEB", border: "#A32D2D", text: "#791F1F", icon: "✗" },
 };
 
-function StatusPill({ result }) {
-  const cfg = RESULT_CONFIG[result] || { bg: "#F1EFE8", border: "#5F5E5A", text: "#444441", icon: "—" };
-  const label = result === "pass" ? "Pass" : result === "fail" ? "Fail" : result === "marginal" ? "Marginal" : result === "warn" ? "Caution" : "Pending";
-  return (
-    <span style={{ display:"inline-block", fontSize:11, fontWeight:500, padding:"3px 10px", borderRadius:20, background:cfg.bg, color:cfg.text, border:`0.5px solid ${cfg.border}` }}>
-      {label}
-    </span>
-  );
+function pill(result) {
+  const c = CFG[result] || { bg:"#F1EFE8", border:"#aaa", text:"#666" };
+  const label = result==="pass"?"Pass":result==="fail"?"Fail":result==="marginal"?"Marginal":result==="warn"?"Caution":"Pending";
+  return <span style={{ display:"inline-block", fontSize:11, fontWeight:500, padding:"3px 10px", borderRadius:20, background:c.bg, color:c.text, border:`0.5px solid ${c.border}` }}>{label}</span>;
 }
 
 function VerdictBox({ result, title, subtitle }) {
-  const cfg = RESULT_CONFIG[result] || RESULT_CONFIG.warn;
+  const c = CFG[result] || CFG.warn;
   return (
-    <div style={{ background:cfg.bg, border:`0.5px solid ${cfg.border}`, borderRadius:8, padding:"10px 14px", display:"flex", gap:10, alignItems:"flex-start", marginBottom:8 }}>
-      <span style={{ fontSize:18, color:cfg.text, flexShrink:0 }}>{cfg.icon}</span>
+    <div style={{ background:c.bg, border:`0.5px solid ${c.border}`, borderRadius:8, padding:"10px 14px", display:"flex", gap:10, alignItems:"flex-start", marginBottom:8 }}>
+      <span style={{ fontSize:18, color:c.text, flexShrink:0 }}>{c.icon}</span>
       <div>
-        <div style={{ fontSize:14, fontWeight:500, color:cfg.text }}>{title}</div>
-        {subtitle && <div style={{ fontSize:12, color:cfg.text, marginTop:2, lineHeight:1.5 }}>{subtitle}</div>}
+        <div style={{ fontSize:14, fontWeight:500, color:c.text }}>{title}</div>
+        {subtitle && <div style={{ fontSize:12, color:c.text, marginTop:2, lineHeight:1.5 }}>{subtitle}</div>}
       </div>
     </div>
   );
@@ -125,32 +97,32 @@ function MetricCard({ label, value, threshold, maxVal }) {
   if (value == null) return (
     <div style={{ background:"#fff", border:"0.5px solid rgba(0,0,0,0.1)", borderRadius:8, padding:"10px 12px" }}>
       <div style={{ fontSize:11, color:"#888", marginBottom:5 }}>{label}</div>
-      <div style={{ fontSize:20, fontWeight:500, color:"#aaa" }}>—</div>
-      <div style={{ fontSize:10, color:"#aaa", marginTop:3 }}>Not available</div>
+      <div style={{ fontSize:20, fontWeight:500, color:"#ccc" }}>—</div>
+      <div style={{ fontSize:10, color:"#bbb", marginTop:3 }}>Not available</div>
     </div>
   );
   const passes = value >= threshold;
-  const color = passes ? "#0F6E56" : "#A32D2D";
+  const col = passes ? "#0F6E56" : "#A32D2D";
   const pct = Math.min(100, Math.round((value / maxVal) * 100));
   const threshPct = Math.min(100, Math.round((threshold / maxVal) * 100));
   return (
-    <div style={{ background:"#fff", border:"0.5px solid rgba(0,0,0,0.1)", borderRadius:8, padding:"10px 12px" }}>
+    <div style={{ background:"#fff", border:`0.5px solid ${passes ? "rgba(15,110,86,0.3)" : "rgba(163,45,45,0.3)"}`, borderRadius:8, padding:"10px 12px" }}>
       <div style={{ fontSize:11, color:"#666", marginBottom:5, lineHeight:1.3 }}>{label}</div>
-      <div style={{ fontSize:20, fontWeight:500, color, marginBottom:4 }}>{value}%</div>
+      <div style={{ fontSize:20, fontWeight:500, color:col, marginBottom:4 }}>{value}%</div>
       <div style={{ height:5, background:"#eee", borderRadius:3, marginBottom:4, position:"relative" }}>
-        <div style={{ height:"100%", width:`${pct}%`, background:color, borderRadius:3 }} />
-        <div style={{ position:"absolute", top:-2, bottom:-2, left:`${threshPct}%`, width:2, background:"#E24B4A", borderRadius:1 }} />
+        <div style={{ height:"100%", width:`${pct}%`, background:col, borderRadius:3 }} />
+        <div style={{ position:"absolute", top:-2, bottom:-2, left:`${threshPct}%`, width:2, background:"rgba(163,45,45,0.6)", borderRadius:1 }} title={`Threshold ${threshold}%`} />
       </div>
-      <div style={{ fontSize:10, color:"#999" }}>Threshold ≥{threshold}%</div>
+      <div style={{ fontSize:10, color:"#999" }}>Threshold ≥{threshold}% · {passes ? "✓ Pass" : "✗ Below threshold"}</div>
     </div>
   );
 }
 
-function ContextFlag({ icon, text }) {
+function ContextFlag({ icon, text, color }) {
   return (
-    <div style={{ border:"0.5px solid rgba(0,0,0,0.12)", borderRadius:8, padding:"8px 12px", marginBottom:6, display:"flex", gap:8, alignItems:"flex-start" }}>
-      <span style={{ fontSize:14, color:"#888", flexShrink:0, marginTop:1 }}>{icon}</span>
-      <p style={{ fontSize:12, color:"#666", lineHeight:1.5, margin:0 }}>{text}</p>
+    <div style={{ border:"0.5px solid rgba(0,0,0,0.1)", borderRadius:8, padding:"8px 12px", marginBottom:6, display:"flex", gap:8, alignItems:"flex-start", background: color ? color+"10" : "transparent" }}>
+      <span style={{ fontSize:14, flexShrink:0, marginTop:1 }}>{icon}</span>
+      <p style={{ fontSize:12, color:"#555", lineHeight:1.5, margin:0 }}>{text}</p>
     </div>
   );
 }
@@ -160,12 +132,12 @@ function ToggleGroup({ options, value, onChange }) {
     <div style={{ display:"flex", gap:6 }}>
       {options.map(opt => {
         const active = value === opt.value;
-        const cfg = opt.result ? (RESULT_CONFIG[opt.result] || {}) : {};
+        const c = opt.result ? (CFG[opt.result] || {}) : {};
         return (
-          <button key={opt.value} onClick={() => onChange(opt.value)} style={{ flex:1, padding:"8px 6px", borderRadius:8, cursor:"pointer", border: active && cfg.border ? `1px solid ${cfg.border}` : "0.5px solid rgba(0,0,0,0.12)", background: active && cfg.bg ? cfg.bg : "#f5f5f3", color: active && cfg.text ? cfg.text : "#555", fontWeight: active ? 500 : 400, fontSize:12, textAlign:"center", transition:"all 0.15s" }}>
-            <div style={{ fontSize:16, marginBottom:3 }}>{opt.icon}</div>
-            <div style={{ fontWeight:500 }}>{opt.label}</div>
-            <div style={{ fontSize:10, opacity:0.8, marginTop:1 }}>{opt.sub}</div>
+          <button key={opt.value} onClick={() => onChange(opt.value)} style={{ flex:1, padding:"9px 6px", borderRadius:8, cursor:"pointer", border: active && c.border ? `1px solid ${c.border}` : "0.5px solid rgba(0,0,0,0.12)", background: active && c.bg ? c.bg : "#f7f7f5", color: active && c.text ? c.text : "#555", fontWeight: active ? 500 : 400, fontSize:12, textAlign:"center", transition:"all 0.12s" }}>
+            <div style={{ fontSize:17, marginBottom:3 }}>{opt.icon}</div>
+            <div style={{ fontWeight:500, marginBottom:1 }}>{opt.label}</div>
+            <div style={{ fontSize:10, opacity:0.75 }}>{opt.sub}</div>
           </button>
         );
       })}
@@ -174,28 +146,23 @@ function ToggleGroup({ options, value, onChange }) {
 }
 
 function ViewItem({ label, hint, value, onChange }) {
-  const opts = [
-    { value:"good", label:"Good",     result:"pass" },
-    { value:"mod",  label:"Moderate", result:"warn" },
-    { value:"poor", label:"Poor",     result:"fail" },
-  ];
   return (
     <div style={{ background:"#fff", border:"0.5px solid rgba(0,0,0,0.1)", borderRadius:8, padding:"10px 12px", marginBottom:8 }}>
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8, flexWrap:"wrap", marginBottom: hint ? 8 : 0 }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8, flexWrap:"wrap", marginBottom: hint ? 7 : 0 }}>
         <span style={{ fontSize:13, fontWeight:500 }}>{label}</span>
         <div style={{ display:"flex", gap:5 }}>
-          {opts.map(o => {
-            const cfg = RESULT_CONFIG[o.result];
-            const active = value === o.value;
+          {[{v:"good",l:"Good",r:"pass"},{v:"mod",l:"Moderate",r:"warn"},{v:"poor",l:"Poor",r:"fail"}].map(o => {
+            const c = CFG[o.r];
+            const active = value === o.v;
             return (
-              <button key={o.value} onClick={() => onChange(o.value)} style={{ padding:"4px 10px", fontSize:11, borderRadius:20, cursor:"pointer", border: active ? `0.5px solid ${cfg.border}` : "0.5px solid rgba(0,0,0,0.12)", background: active ? cfg.bg : "#f5f5f3", color: active ? cfg.text : "#888", fontWeight: active ? 500 : 400 }}>
-                {o.label}
+              <button key={o.v} onClick={() => onChange(o.v)} style={{ padding:"4px 10px", fontSize:11, borderRadius:20, cursor:"pointer", border: active ? `0.5px solid ${c.border}` : "0.5px solid rgba(0,0,0,0.12)", background: active ? c.bg : "#f7f7f5", color: active ? c.text : "#888", fontWeight: active ? 500 : 400 }}>
+                {o.l}
               </button>
             );
           })}
         </div>
       </div>
-      {hint && <p style={{ fontSize:11, color:"#999", margin:0 }}>{hint}</p>}
+      {hint && <p style={{ fontSize:11, color:"#aaa", margin:0 }}>{hint}</p>}
     </div>
   );
 }
@@ -203,14 +170,13 @@ function ViewItem({ label, hint, value, onChange }) {
 // ── MAIN COMPONENT ────────────────────────────────────────────────────────────
 
 export default function LevelOutSiteScorer() {
-  const [postcode, setPostcode]         = useState("");
-  const [lookupResult, setLookupResult] = useState(null);
-  const [loading, setLoading]           = useState(false);
-  const [error, setError]               = useState("");
-  const [dataSource, setDataSource]     = useState(null); // "lsoa-exact" | "lsoa-live" | "estimated"
-  const [activeTab, setActiveTab]       = useState(0);
-  const [comp, setComp]                 = useState(null);
-  const [fitness, setFitness]           = useState(null);
+  const [postcode, setPostcode]     = useState("");
+  const [result, setResult]         = useState(null);
+  const [loading, setLoading]       = useState(false);
+  const [error, setError]           = useState("");
+  const [activeTab, setActiveTab]   = useState(0);
+  const [comp, setComp]             = useState(null);
+  const [fitness, setFitness]       = useState(null);
   const [view, setView] = useState({
     transport:null, frontage:null, pedestrian:null,
     street:null, lifestyle:null, neighbourhood:null,
@@ -221,98 +187,60 @@ export default function LevelOutSiteScorer() {
     if (!trimmed) { setError("Please enter a postcode."); return; }
     const clean = trimmed.replace(/\s/g,"");
     if (clean.length < 5 || clean.length > 7) { setError("Enter a valid UK postcode (e.g. SE15 4QD)."); return; }
-
-    setError("");
-    setLoading(true);
-    setLookupResult(null);
-    setDataSource(null);
-    setComp(null);
-    setFitness(null);
+    setError(""); setLoading(true); setResult(null);
+    setComp(null); setFitness(null);
     setView({ transport:null, frontage:null, pedestrian:null, street:null, lifestyle:null, neighbourhood:null });
     setActiveTab(0);
 
-    const formatted = clean.slice(0,-3) + " " + clean.slice(-3);
-    const district = formatted.split(" ")[0];
-
-    // Check if it's a portfolio postcode first — use exact LSOA data
-    const exactLsoa = LSOA_POSTCODE_MAP[district];
-    if (exactLsoa && LSOA_DB[exactLsoa]) {
-      setLookupResult({ postcode: formatted, district, lsoaCode: exactLsoa, data: LSOA_DB[exactLsoa] });
-      setDataSource("lsoa-exact");
-      setLoading(false);
-      return;
-    }
-
-    // Otherwise fetch live from APIs
     try {
-      const { lsoaCode, area } = await fetchLSOAFromPostcode(formatted);
+      const formatted = clean.slice(0,-3) + " " + clean.slice(-3);
+      const { lsoaCode, ward, district, borough } = await fetchLSOAFromPostcode(formatted);
 
-      if (!lsoaCode) throw new Error("No LSOA found for this postcode");
+      if (!lsoaCode) throw new Error("Could not determine LSOA for this postcode");
 
-      const censusData = await fetchCensusForLSOA(lsoaCode);
-      const char = inferCharacter(lsoaCode, area);
+      const censusData = LSOA_CENSUS[lsoaCode];
+      if (!censusData) throw new Error(`No census data found for LSOA ${lsoaCode}. This postcode may be outside Greater London.`);
 
-      setLookupResult({
-        postcode: formatted,
-        district,
-        lsoaCode,
-        data: {
-          area,
-          deg:  censusData.deg,
-          age:  censusData.age,
-          prof: censusData.prof,
-          char,
-          popDesc: `${area} — live ONS Census 2021 data for LSOA ${lsoaCode}`,
-        }
-      });
-      setDataSource("lsoa-live");
-
+      setResult({ postcode: formatted, lsoaCode, ward, district, borough, data: censusData });
     } catch (err) {
-      // API failed — show error with option to continue with district estimate
-      setError(`Could not fetch live data: ${err.message}. Check postcode and try again.`);
+      setError(err.message);
     }
 
     setLoading(false);
   };
 
   const handleReset = () => {
-    setPostcode(""); setLookupResult(null); setError(""); setLoading(false); setDataSource(null);
+    setPostcode(""); setResult(null); setError(""); setLoading(false);
     setComp(null); setFitness(null);
     setView({ transport:null, frontage:null, pedestrian:null, street:null, lifestyle:null, neighbourhood:null });
     setActiveTab(0);
   };
 
-  const demoResult  = getDemoResult(lookupResult?.data);
-  const compResult  = getCompResult(comp);
-  const viewResult  = getViewResult(view);
-  const overall     = getOverall(demoResult, compResult, viewResult);
-  const demoStatus  = demoResult === "pass" ? "pass" : demoResult === "marginal" ? "warn" : demoResult === "fail" ? "fail" : null;
+  const demoResult = getDemoResult(result?.data);
+  const compResult = getCompResult(comp);
+  const viewResult = getViewResult(view);
+  const overall    = getOverall(demoResult, compResult, viewResult);
+  const demoStatus = demoResult === "pass" ? "pass" : demoResult === "marginal" ? "warn" : demoResult === "fail" ? "fail" : null;
   const tabStatuses = [demoStatus, compResult, viewResult, overall];
 
   const TAB_LABELS = ["Demographics", "Competition", "Visibility", "Results"];
   const TAB_ICONS  = ["👥", "🏪", "👁️", "📊"];
-  const statusIcon  = s => s === "pass" ? "✓" : s === "warn" ? "⚠" : s === "fail" ? "✗" : "—";
-  const statusColor = s => s === "pass" ? "#0F6E56" : s === "warn" ? "#854F0B" : s === "fail" ? "#A32D2D" : "#aaa";
+  const sIcon  = s => s==="pass"?"✓":s==="warn"?"⚠":s==="fail"?"✗":"—";
+  const sColor = s => s==="pass"?"#0F6E56":s==="warn"?"#854F0B":s==="fail"?"#A32D2D":"#ccc";
 
-  const dataSourceLabel = dataSource === "lsoa-exact"
-    ? "✓ Exact LSOA data — portfolio calibration site"
-    : dataSource === "lsoa-live"
-    ? `✓ Live LSOA data — ONS Census 2021 · ${lookupResult?.lsoaCode}`
-    : null;
+  const densityBand = result?.data?.dens ? getDensityBand(result.data.dens) : null;
 
   return (
-    <div style={{ fontFamily:"system-ui,-apple-system,sans-serif", maxWidth:680, margin:"0 auto", padding:"24px 16px", color:"#1a1a1a" }}>
+    <div style={{ fontFamily:"system-ui,-apple-system,sans-serif", maxWidth:680, margin:"0 auto", padding:"24px 16px", color:"#1a1a1a", minHeight:"100vh", background:"#fafaf8" }}>
 
       {/* Header */}
       <div style={{ marginBottom:20 }}>
         <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:4 }}>
-          <h1 style={{ fontSize:20, fontWeight:500 }}>LevelOut Site Scorer</h1>
-          <span style={{ fontSize:11, fontWeight:500, padding:"2px 8px", borderRadius:20, background:"#E1F5EE", color:"#085041" }}>
-            Live LSOA data
-          </span>
+          <h1 style={{ fontSize:20, fontWeight:500, margin:0 }}>LevelOut Site Scorer</h1>
+          <span style={{ fontSize:11, fontWeight:500, padding:"2px 9px", borderRadius:20, background:"#E1F5EE", color:"#085041" }}>Live LSOA data</span>
         </div>
-        <p style={{ fontSize:13, color:"#666" }}>
-          Three-stage filter · Demographics powered by live ONS Census 2021 API · Thresholds calibrated against 18 London sites
+        <p style={{ fontSize:13, color:"#888", margin:0 }}>
+          Three-stage filter · {(4994).toLocaleString()} London LSOAs · ONS Census 2021 · Calibrated against 18 LevelOut sites
         </p>
       </div>
 
@@ -323,28 +251,21 @@ export default function LevelOutSiteScorer() {
           <input
             value={postcode}
             onChange={e => setPostcode(e.target.value.toUpperCase())}
-            onKeyDown={e => e.key === "Enter" && !loading && handleAssess()}
+            onKeyDown={e => e.key==="Enter" && !loading && handleAssess()}
             placeholder="e.g. CR0 2AD"
             maxLength={8}
             disabled={loading}
-            style={{ flex:1, fontSize:15, padding:"8px 12px", borderRadius:8, border:"0.5px solid rgba(0,0,0,0.2)", letterSpacing:"0.05em", outline:"none", background:"#fff", opacity: loading ? 0.6 : 1 }}
+            style={{ flex:1, fontSize:15, padding:"9px 12px", borderRadius:8, border:"0.5px solid rgba(0,0,0,0.2)", letterSpacing:"0.05em", outline:"none", background:"#fff", fontFamily:"inherit" }}
           />
-          <button
-            onClick={handleAssess}
-            disabled={loading}
-            style={{ padding:"8px 20px", fontSize:14, fontWeight:500, borderRadius:8, border:"0.5px solid rgba(0,0,0,0.2)", background: loading ? "#f0f0f0" : "#fff", cursor: loading ? "default" : "pointer", whiteSpace:"nowrap" }}
-          >
-            {loading ? "Fetching..." : "Assess ↗"}
+          <button onClick={handleAssess} disabled={loading} style={{ padding:"9px 20px", fontSize:14, fontWeight:500, borderRadius:8, border:"0.5px solid rgba(0,0,0,0.15)", background: loading?"#f0f0ee":"#fff", cursor: loading?"default":"pointer", fontFamily:"inherit" }}>
+            {loading ? "Loading…" : "Assess ↗"}
           </button>
         </div>
-        {error && <div style={{ fontSize:13, color:"#A32D2D", marginTop:6 }}>{error}</div>}
-        {loading && (
-          <div style={{ fontSize:12, color:"#666", marginTop:8, padding:"8px 12px", background:"#f5f5f3", borderRadius:8 }}>
-            Fetching live LSOA data from ONS Census 2021...
+        {error && <div style={{ fontSize:13, color:"#A32D2D", marginTop:6, padding:"8px 12px", background:"#FCEBEB", borderRadius:6 }}>{error}</div>}
+        {result && !loading && (
+          <div style={{ fontSize:11, color:"#0F6E56", marginTop:6 }}>
+            ✓ Real-time data · LSOA {result.lsoaCode} · {result.borough}
           </div>
-        )}
-        {dataSourceLabel && !loading && (
-          <div style={{ fontSize:11, color:"#0F6E56", marginTop:6 }}>{dataSourceLabel}</div>
         )}
       </div>
 
@@ -354,11 +275,11 @@ export default function LevelOutSiteScorer() {
           const status = tabStatuses[i];
           const active = activeTab === i;
           return (
-            <button key={i} onClick={() => setActiveTab(i)} style={{ flex:1, padding:"8px 6px", borderRadius:8, cursor:"pointer", border: active ? "1px solid #185FA5" : "0.5px solid rgba(0,0,0,0.12)", background: active ? "#E6F1FB" : "#f5f5f3", textAlign:"center", transition:"all 0.15s" }}>
+            <button key={i} onClick={() => setActiveTab(i)} style={{ flex:1, padding:"8px 6px", borderRadius:8, cursor:"pointer", border: active?"1px solid #185FA5":"0.5px solid rgba(0,0,0,0.12)", background: active?"#E6F1FB":"#f7f7f5", textAlign:"center", transition:"all 0.12s", fontFamily:"inherit" }}>
               <div style={{ fontSize:16, marginBottom:2 }}>{TAB_ICONS[i]}</div>
-              <div style={{ fontSize:10, color: active ? "#185FA5" : "#999", marginBottom:1 }}>{i < 3 ? `Stage ${i+1}` : ""}</div>
-              <div style={{ fontSize:12, fontWeight:500, color: active ? "#0C447C" : "#333" }}>{label}</div>
-              <div style={{ fontSize:11, color:statusColor(status), marginTop:2, fontWeight:500 }}>{statusIcon(status)}</div>
+              <div style={{ fontSize:10, color:active?"#185FA5":"#aaa", marginBottom:1 }}>{i < 3 ? `Stage ${i+1}` : ""}</div>
+              <div style={{ fontSize:12, fontWeight:500, color:active?"#0C447C":"#333" }}>{label}</div>
+              <div style={{ fontSize:12, color:sColor(status), marginTop:2, fontWeight:500 }}>{sIcon(status)}</div>
             </button>
           );
         })}
@@ -367,33 +288,39 @@ export default function LevelOutSiteScorer() {
       {/* ── STAGE 1: DEMOGRAPHICS ── */}
       {activeTab === 0 && (
         <div>
-          {!lookupResult && !loading ? (
-            <p style={{ fontSize:13, color:"#999", padding:"8px 0" }}>Enter a postcode above to run the demographic analysis.</p>
-          ) : lookupResult ? (
+          {!result ? (
+            <p style={{ fontSize:13, color:"#aaa", padding:"8px 0" }}>Enter a postcode above to run the demographic analysis.</p>
+          ) : (
             <>
-              <div style={{ fontSize:11, fontWeight:500, color:"#888", textTransform:"uppercase", letterSpacing:"0.07em", marginBottom:10 }}>
-                Census 2021 signals — LSOA level
+              <div style={{ fontSize:11, fontWeight:500, color:"#999", textTransform:"uppercase", letterSpacing:"0.07em", marginBottom:10 }}>
+                ONS Census 2021 — LSOA {result.lsoaCode}
               </div>
+
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8, marginBottom:12 }}>
-                <MetricCard label="Level 4+ qualifications" value={lookupResult.data?.deg}  threshold={THRESHOLDS.deg}  maxVal={85} />
-                <MetricCard label="Aged 25–44"              value={lookupResult.data?.age}  threshold={THRESHOLDS.age}  maxVal={60} />
-                <MetricCard label="Professional / managerial" value={lookupResult.data?.prof} threshold={THRESHOLDS.prof} maxVal={70} />
+                <MetricCard label="Level 4+ qualifications" value={result.data.deg}  threshold={THRESHOLDS.deg}  maxVal={85} />
+                <MetricCard label="Aged 25–44"              value={result.data.age}  threshold={THRESHOLDS.age}  maxVal={60} />
+                <MetricCard label="Professional / mgr"      value={result.data.prof} threshold={THRESHOLDS.prof} maxVal={70} />
               </div>
 
-              {demoResult === "pass"     && <VerdictBox result="pass"     title="Demographics: Pass"     subtitle={`${lookupResult.data?.area} — ${lookupResult.data?.popDesc}`} />}
-              {demoResult === "marginal" && <VerdictBox result="marginal" title="Demographics: Marginal"  subtitle={`${lookupResult.data?.area} — passes most thresholds but at least one signal is below minimum. Proceed with extra caution.`} />}
-              {demoResult === "fail"     && <VerdictBox result="fail"     title="Demographics: Fail — do not proceed" subtitle={`${lookupResult.data?.area} — profile does not meet LevelOut's minimum demographic threshold.`} />}
+              {demoResult==="pass"     && <VerdictBox result="pass"     title="Demographics: Pass"              subtitle={`${result.ward}, ${result.borough}`} />}
+              {demoResult==="marginal" && <VerdictBox result="marginal" title="Demographics: Marginal"           subtitle="Passes most thresholds but at least one signal is below minimum. Proceed with extra caution." />}
+              {demoResult==="fail"     && <VerdictBox result="fail"     title="Demographics: Fail — do not proceed" subtitle="Profile does not meet LevelOut's minimum demographic threshold. Stage 2 and 3 not required." />}
 
-              {lookupResult.data?.char === "village"   && <ContextFlag icon="🏡" text="Village character — organic, community-rooted neighbourhood. Higher ceiling potential and strong word-of-mouth dynamics." />}
-              {lookupResult.data?.char === "newbuild"  && <ContextFlag icon="🏢" text="New build character — good visibility but expect faster launch, potentially lower ceiling, and higher member churn vs. village areas." />}
-              {lookupResult.data?.char === "transient" && <ContextFlag icon="💼" text="Transient / office-dominant character — high education metrics but low residential rootedness. Similar profile to St Paul's EC4M in your portfolio." />}
+              {/* Density context flag */}
+              {densityBand && (
+                <ContextFlag
+                  icon={result.data.dens >= 10000 ? "🏙️" : result.data.dens >= 4000 ? "🏘️" : "🌳"}
+                  text={`${densityBand.label} — ${result.data.dens.toLocaleString()} persons/km² · ${densityBand.note}`}
+                  color={densityBand.color}
+                />
+              )}
 
-              <p style={{ fontSize:11, color:"#bbb", marginTop:12, paddingTop:10, borderTop:"0.5px solid rgba(0,0,0,0.08)" }}>
-                {dataSource === "lsoa-live" ? `Live data: ONS Census 2021 via Nomis API · LSOA ${lookupResult.lsoaCode}` : "Source: ONS Census 2021 · LevelOut portfolio calibration data"}
+              <p style={{ fontSize:11, color:"#ccc", marginTop:12, paddingTop:10, borderTop:"0.5px solid rgba(0,0,0,0.06)" }}>
+                Source: ONS Census 2021 · Nomis TS067, TS007A, TS062, TS006 · Thresholds calibrated against 18 LevelOut London sites
               </p>
             </>
-          ) : null}
-          <button onClick={() => setActiveTab(1)} style={{ width:"100%", padding:"9px", marginTop:16, fontSize:13, fontWeight:500, background:"#fff", border:"0.5px solid rgba(0,0,0,0.15)", borderRadius:8, cursor:"pointer" }}>
+          )}
+          <button onClick={() => setActiveTab(1)} style={{ width:"100%", padding:"9px", marginTop:16, fontSize:13, fontWeight:500, background:"#fff", border:"0.5px solid rgba(0,0,0,0.12)", borderRadius:8, cursor:"pointer", fontFamily:"inherit" }}>
             Continue to competition →
           </button>
         </div>
@@ -402,27 +329,27 @@ export default function LevelOutSiteScorer() {
       {/* ── STAGE 2: COMPETITION ── */}
       {activeTab === 1 && (
         <div>
-          <div style={{ fontSize:11, fontWeight:500, color:"#888", textTransform:"uppercase", letterSpacing:"0.07em", marginBottom:10 }}>Direct reformer competition within 1km</div>
+          <div style={{ fontSize:11, fontWeight:500, color:"#999", textTransform:"uppercase", letterSpacing:"0.07em", marginBottom:10 }}>Direct reformer competition within 1km</div>
           <ToggleGroup value={comp} onChange={setComp} options={[
-            { value:"low",  label:"Low",      sub:"0–1 studios",  icon:"✓", result:"pass" },
-            { value:"mod",  label:"Moderate", sub:"2–3 studios",  icon:"⚠", result:"warn" },
-            { value:"high", label:"High",     sub:"4+ studios",   icon:"✗", result:"fail" },
+            { value:"low",  label:"Low",      sub:"0–1 studios", icon:"✓", result:"pass" },
+            { value:"mod",  label:"Moderate", sub:"2–3 studios", icon:"⚠", result:"warn" },
+            { value:"high", label:"High",     sub:"4+ studios",  icon:"✗", result:"fail" },
           ]} />
 
-          <div style={{ fontSize:11, fontWeight:500, color:"#888", textTransform:"uppercase", letterSpacing:"0.07em", margin:"16px 0 10px" }}>Indirect boutique fitness market nearby</div>
+          <div style={{ fontSize:11, fontWeight:500, color:"#999", textTransform:"uppercase", letterSpacing:"0.07em", margin:"16px 0 10px" }}>Indirect boutique fitness market nearby</div>
           <ToggleGroup value={fitness} onChange={setFitness} options={[
             { value:"low",  label:"Low",      sub:"Market unproven", icon:"—", result:"warn" },
             { value:"mod",  label:"Moderate", sub:"Some demand",     icon:"✓", result:"pass" },
             { value:"high", label:"High",     sub:"Strong demand",   icon:"🔥", result:"pass" },
           ]} />
 
-          <div style={{ marginTop:10 }}>
-            {compResult === "fail" && <VerdictBox result="fail" title="Competition: Fail — do not proceed" subtitle="High direct competition is disqualifying. No strong site in your portfolio has high direct competition." />}
-            {compResult === "warn" && <VerdictBox result="warn" title="Competition: Caution" subtitle="Moderate competition is viable but requires strong visibility and demographics to compensate." />}
-            {compResult === "pass" && <VerdictBox result="pass" title="Competition: Pass" subtitle="Low direct competition — strong market position. Your best sites entered low-competition markets." />}
+          <div style={{ marginTop:12 }}>
+            {compResult==="fail" && <VerdictBox result="fail" title="Competition: Fail — do not proceed" subtitle="High direct competition is disqualifying. No strong site in your portfolio has high direct competition." />}
+            {compResult==="warn" && <VerdictBox result="warn" title="Competition: Caution" subtitle="Moderate competition is viable but requires strong visibility and demographics. East Dulwich, Peckham and Brixton show it can work." />}
+            {compResult==="pass" && <VerdictBox result="pass" title="Competition: Pass" subtitle="Low direct competition — strong market position. Your best sites entered low-competition markets." />}
           </div>
 
-          <button onClick={() => setActiveTab(2)} style={{ width:"100%", padding:"9px", marginTop:16, fontSize:13, fontWeight:500, background:"#fff", border:"0.5px solid rgba(0,0,0,0.15)", borderRadius:8, cursor:"pointer" }}>
+          <button onClick={() => setActiveTab(2)} style={{ width:"100%", padding:"9px", marginTop:16, fontSize:13, fontWeight:500, background:"#fff", border:"0.5px solid rgba(0,0,0,0.12)", borderRadius:8, cursor:"pointer", fontFamily:"inherit" }}>
             Continue to visibility →
           </button>
         </div>
@@ -431,7 +358,7 @@ export default function LevelOutSiteScorer() {
       {/* ── STAGE 3: VISIBILITY ── */}
       {activeTab === 2 && (
         <div>
-          <p style={{ fontSize:13, color:"#666", marginBottom:14 }}>Score the unit and its immediate surroundings based on your viewing.</p>
+          <p style={{ fontSize:13, color:"#888", marginBottom:14 }}>Score the unit and its immediate surroundings based on your viewing.</p>
           {[
             { key:"transport",     label:"Visibility from transport",  hint:"Can you see the site or a natural route to it from the station exit?" },
             { key:"frontage",      label:"Street frontage",            hint:"Prominent high-street position vs. tucked away or basement" },
@@ -444,12 +371,12 @@ export default function LevelOutSiteScorer() {
           ))}
 
           <div style={{ marginTop:8 }}>
-            {viewResult === "fail" && <VerdictBox result="fail" title="Visibility: Fail" subtitle="Multiple poor viewing scores. Unit conditions will significantly hamper performance regardless of neighbourhood quality." />}
-            {viewResult === "pass" && <VerdictBox result="pass" title="Visibility: Pass" subtitle="Strong unit conditions across all criteria." />}
-            {viewResult === "warn" && <VerdictBox result="warn" title="Visibility: Moderate" subtitle="Mixed viewing scores. Site needs strong demographics and low competition to compensate." />}
+            {viewResult==="fail" && <VerdictBox result="fail" title="Visibility: Fail" subtitle="Multiple poor viewing scores. Unit conditions will significantly hamper performance regardless of neighbourhood quality." />}
+            {viewResult==="pass" && <VerdictBox result="pass" title="Visibility: Pass" subtitle="Strong unit conditions across all criteria." />}
+            {viewResult==="warn" && <VerdictBox result="warn" title="Visibility: Moderate" subtitle="Mixed viewing scores. Site needs strong demographics and low competition to compensate." />}
           </div>
 
-          <button onClick={() => setActiveTab(3)} style={{ width:"100%", padding:"9px", marginTop:12, fontSize:13, fontWeight:500, background:"#fff", border:"0.5px solid rgba(0,0,0,0.15)", borderRadius:8, cursor:"pointer" }}>
+          <button onClick={() => setActiveTab(3)} style={{ width:"100%", padding:"9px", marginTop:12, fontSize:13, fontWeight:500, background:"#fff", border:"0.5px solid rgba(0,0,0,0.12)", borderRadius:8, cursor:"pointer", fontFamily:"inherit" }}>
             View full results →
           </button>
         </div>
@@ -458,17 +385,17 @@ export default function LevelOutSiteScorer() {
       {/* ── RESULTS ── */}
       {activeTab === 3 && (
         <div>
-          {!lookupResult ? (
-            <p style={{ fontSize:13, color:"#999", padding:"8px 0" }}>Complete all three stages to see your full assessment.</p>
+          {!result ? (
+            <p style={{ fontSize:13, color:"#aaa", padding:"8px 0" }}>Complete all three stages to see your full assessment.</p>
           ) : (
             <>
               {overall && (
-                <div style={{ borderRadius:12, padding:"14px 16px", textAlign:"center", marginBottom:14, background: overall==="pass"?"#E1F5EE":overall==="warn"?"#FAEEDA":"#FCEBEB" }}>
-                  <div style={{ fontSize:11, fontWeight:500, textTransform:"uppercase", letterSpacing:"0.07em", marginBottom:5, color: overall==="pass"?"#085041":overall==="warn"?"#633806":"#791F1F" }}>Overall assessment</div>
-                  <div style={{ fontSize:20, fontWeight:500, marginBottom:4, color: overall==="pass"?"#085041":overall==="warn"?"#633806":"#791F1F" }}>
+                <div style={{ borderRadius:12, padding:"16px", textAlign:"center", marginBottom:16, background: overall==="pass"?"#E1F5EE":overall==="warn"?"#FAEEDA":"#FCEBEB" }}>
+                  <div style={{ fontSize:11, fontWeight:500, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:5, color: overall==="pass"?"#085041":overall==="warn"?"#633806":"#791F1F" }}>Overall assessment</div>
+                  <div style={{ fontSize:22, fontWeight:500, marginBottom:5, color: overall==="pass"?"#085041":overall==="warn"?"#633806":"#791F1F" }}>
                     {overall==="pass"?"Strong candidate":overall==="warn"?"Proceed with caution":"Do not proceed"}
                   </div>
-                  <div style={{ fontSize:12, color: overall==="pass"?"#085041":overall==="warn"?"#633806":"#791F1F" }}>
+                  <div style={{ fontSize:12, color: overall==="pass"?"#085041":overall==="warn"?"#633806":"#791F1F", lineHeight:1.5 }}>
                     {overall==="pass" && "All three stages pass. This site profiles similarly to your best-performing locations."}
                     {overall==="warn" && "Site passes minimum thresholds but has caution flags. Weigh risks carefully before committing to Heads of Terms."}
                     {overall==="fail" && "One or more stages have failed. This site does not meet LevelOut's minimum criteria."}
@@ -477,37 +404,52 @@ export default function LevelOutSiteScorer() {
               )}
 
               <div style={{ background:"#fff", border:"0.5px solid rgba(0,0,0,0.1)", borderRadius:12, overflow:"hidden", marginBottom:12 }}>
-                <div style={{ padding:"12px 16px", borderBottom:"0.5px solid rgba(0,0,0,0.08)" }}>
-                  <div style={{ fontSize:22, fontWeight:500, letterSpacing:"0.05em" }}>{lookupResult.postcode}</div>
-                  <div style={{ fontSize:12, color:"#888", marginTop:2 }}>{lookupResult.data?.area}</div>
-                  {lookupResult.lsoaCode && <div style={{ fontSize:11, color:"#aaa", marginTop:1 }}>LSOA: {lookupResult.lsoaCode}</div>}
+                <div style={{ padding:"12px 16px", borderBottom:"0.5px solid rgba(0,0,0,0.06)", background:"#fafaf8" }}>
+                  <div style={{ fontSize:22, fontWeight:500, letterSpacing:"0.05em" }}>{result.postcode}</div>
+                  <div style={{ fontSize:13, color:"#666", marginTop:2 }}>{result.ward}{result.ward && result.borough ? ", " : ""}{result.borough}</div>
+                  <div style={{ fontSize:11, color:"#bbb", marginTop:1 }}>LSOA {result.lsoaCode}</div>
                 </div>
                 {[
                   { label:"Stage 1 — Demographics", result:demoStatus,  icon:"👥" },
                   { label:"Stage 2 — Competition",  result:compResult,  icon:"🏪" },
                   { label:"Stage 3 — Visibility",   result:viewResult,  icon:"👁️" },
                 ].map((row, i) => (
-                  <div key={i} style={{ display:"flex", alignItems:"center", padding:"10px 16px", borderBottom: i<2?"0.5px solid rgba(0,0,0,0.08)":"none", gap:10 }}>
-                    <span style={{ fontSize:18, flexShrink:0, width:24 }}>{row.icon}</span>
+                  <div key={i} style={{ display:"flex", alignItems:"center", padding:"11px 16px", borderBottom: i<2?"0.5px solid rgba(0,0,0,0.06)":"none", gap:10 }}>
+                    <span style={{ fontSize:18, flexShrink:0, width:26 }}>{row.icon}</span>
                     <span style={{ flex:1, fontSize:13 }}>{row.label}</span>
-                    <StatusPill result={row.result || "pending"} />
+                    {pill(row.result || "pending")}
                   </div>
                 ))}
               </div>
 
-              {lookupResult.data && (
-                <div style={{ border:"0.5px solid rgba(0,0,0,0.1)", borderRadius:8, padding:"8px 12px", marginBottom:8, display:"flex", gap:8 }}>
-                  <span style={{ fontSize:14, color:"#888", flexShrink:0 }}>📍</span>
-                  <p style={{ fontSize:12, color:"#666", lineHeight:1.5, margin:0 }}>{lookupResult.data.popDesc}</p>
+              {/* Demographic detail */}
+              {result.data && (
+                <div style={{ background:"#fff", border:"0.5px solid rgba(0,0,0,0.08)", borderRadius:8, padding:"10px 14px", marginBottom:8 }}>
+                  <div style={{ fontSize:11, color:"#aaa", marginBottom:6, textTransform:"uppercase", letterSpacing:"0.06em" }}>Census signals</div>
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", gap:8 }}>
+                    {[
+                      { label:"Level 4+",   val:result.data.deg,  thresh:THRESHOLDS.deg  },
+                      { label:"Aged 25–44", val:result.data.age,  thresh:THRESHOLDS.age  },
+                      { label:"Prof/Mgr",   val:result.data.prof, thresh:THRESHOLDS.prof },
+                      { label:"Density",    val:result.data.dens ? `${(result.data.dens/1000).toFixed(1)}k` : null, thresh:null },
+                    ].map((s, i) => (
+                      <div key={i} style={{ textAlign:"center" }}>
+                        <div style={{ fontSize:16, fontWeight:500, color: s.thresh ? (s.val >= s.thresh ? "#0F6E56" : "#A32D2D") : "#555" }}>
+                          {s.val != null ? (typeof s.val === "string" ? s.val : `${s.val}%`) : "—"}
+                        </div>
+                        <div style={{ fontSize:10, color:"#aaa", marginTop:1 }}>{s.label}</div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
 
-              <p style={{ fontSize:11, color:"#bbb", marginTop:8, paddingTop:8, borderTop:"0.5px solid rgba(0,0,0,0.08)" }}>
-                {dataSource === "lsoa-live" ? `Live ONS Census 2021 data · LSOA ${lookupResult.lsoaCode} · Thresholds calibrated against 18 LevelOut London sites` : "ONS Census 2021 · LevelOut portfolio calibration data"}
+              <p style={{ fontSize:11, color:"#ccc", marginTop:8, paddingTop:8, borderTop:"0.5px solid rgba(0,0,0,0.06)" }}>
+                ONS Census 2021 · Nomis TS067, TS007A, TS062, TS006 · LSOA {result.lsoaCode}
               </p>
             </>
           )}
-          <button onClick={handleReset} style={{ width:"100%", padding:"9px", marginTop:12, fontSize:13, fontWeight:500, background:"#fff", border:"0.5px solid rgba(0,0,0,0.15)", borderRadius:8, cursor:"pointer" }}>
+          <button onClick={handleReset} style={{ width:"100%", padding:"9px", marginTop:12, fontSize:13, fontWeight:500, background:"#fff", border:"0.5px solid rgba(0,0,0,0.12)", borderRadius:8, cursor:"pointer", fontFamily:"inherit" }}>
             Start new assessment
           </button>
         </div>
